@@ -73,6 +73,12 @@ internal static class Pointer
         foreach (var strategy in new (string Name, Action<PointI> Apply)[]
                  {
                      ("sendinput", AbsoluteSend),
+                     ("sendinput-retry", target =>
+                     {
+                         // A hook can swallow one move; asking again is cheaper than walking.
+                         Thread.Sleep(30);
+                         AbsoluteSend(target);
+                     }),
                      ("setcursorpos", SetPosition),
                      ("waypoints", WalkTo),
                      ("route", RouteTo),

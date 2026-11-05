@@ -184,11 +184,14 @@ if ([string]::IsNullOrWhiteSpace($scriptDir)) {
 $looked = @()
 
 if ([string]::IsNullOrWhiteSpace($Exe)) {
+    # Nearest artifact first: a package folder, then a repo build tree, then the
+    # installed skill, then PATH. The header prints which one won and whether it
+    # matches the installed binary, so there is no doubt about what was tested.
     $candidates = @(
         (Join-Path $scriptDir 'bin\computer-use.exe'),
+        (Join-Path $scriptDir '..\src\ComputerUse\bin\Release\net10.0-windows\win-x64\publish\computer-use.exe'),
         (Join-Path $scriptDir '..\bin\computer-use.exe'),
-        (Join-Path $env:USERPROFILE '.cursor\skills\computer-use\bin\computer-use.exe'),
-        (Join-Path $scriptDir '..\src\ComputerUse\bin\Release\net10.0-windows\win-x64\publish\computer-use.exe')
+        (Join-Path $env:USERPROFILE '.cursor\skills\computer-use\bin\computer-use.exe')
     )
 
     foreach ($candidate in $candidates) {
@@ -229,6 +232,25 @@ $Out = (Resolve-Path -LiteralPath $Out).Path
 
 Write-Host 'computer-use self-test'
 Write-Host ('  exe     : ' + $Exe)
+
+$testedHash = (Get-FileHash -LiteralPath $Exe -Algorithm SHA256).Hash
+$provenance = 'sha256 ' + $testedHash.Substring(0, 16) + '...'
+$installedExe = Join-Path $env:USERPROFILE '.cursor\skills\computer-use\bin\computer-use.exe'
+if (Test-Path -LiteralPath $installedExe -PathType Leaf) {
+    $installedHash = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash
+    if ($installedHash -eq $testedHash) {
+        $provenance = $provenance + '; installed skill binary: identical'
+    }
+    else {
+        $provenance = $provenance + '; installed skill binary: DIFFERENT (sha256 ' +
+            $installedHash.Substring(0, 16) + '...)'
+    }
+}
+else {
+    $provenance = $provenance + '; installed skill binary: not present'
+}
+
+Write-Host ('  tested  : ' + $provenance)
 Write-Host ('  out     : ' + $Out)
 Write-Host ('  samples : ' + $Samples)
 Write-Host ''

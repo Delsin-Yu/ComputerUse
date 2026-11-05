@@ -33,6 +33,8 @@ internal static class Probe
         var watch = Stopwatch.StartNew();
         var monitors = Monitors.All();
 
+        var clipAtStart = ClipCursor();
+
         var response = new Response("screen run-probe");
         var report = new JsonObject
         {
@@ -40,13 +42,30 @@ internal static class Probe
             ["virtualBounds"] = Out.Rect(Monitors.VirtualBounds()),
             ["monitors"] = MonitorArray(monitors),
             ["environment"] = Environment(),
-            ["clipCursor"] = ClipCursor(),
+            ["clipCursor"] = clipAtStart,
         };
 
         report["mapping"] = Mapping(monitors, samples);
         report["seams"] = Seams(monitors);
         report["deadZones"] = DeadZones();
         report["capture"] = CaptureChecks();
+
+        // Read again: a clip rect can be set and released by whatever owns the
+        // foreground, so a single reading at the start can contradict the probes.
+        var clipAtEnd = ClipCursor();
+        var clipChanged = clipAtStart?.ToJsonString() != clipAtEnd?.ToJsonString();
+        if (clipChanged)
+        {
+            report["clipCursorPersisted"] = false;
+            report["clipCursorAtEnd"] = clipAtEnd;
+            report["clipCursorNote"] =
+                "the cursor confinement differed between the start and the end of the probe, "
+                + "so the probes above ran while it was being set or released";
+        }
+        else if (clipAtStart is not null)
+        {
+            report["clipCursorPersisted"] = true;
+        }
 
         var verdict = Verdict(report);
         report["verdict"] = verdict;
@@ -155,7 +174,7 @@ internal static class Probe
         return new JsonObject
         {
             ["rect"] = Out.Rect(clip),
-            ["note"] = "the cursor is confined to this rectangle right now",
+            ["note"] = "the cursor was confined to this rectangle when this was read",
         };
     }
 
@@ -235,7 +254,16 @@ internal static class Probe
 
                     if (bottom - top > SeamOffset * 4)
                     {
-                        seams.Add((JsonNode)VerticalSeam(left, right, top, bottom));
+                        var forward = VerticalSeam(left, right, top, bottom);
+                        seams.Add((JsonNode)forward);
+
+                        if (Crossed(forward) < SeamPoints)
+                        {
+                            var reverse = VerticalSeam(right, left, top, bottom);
+                            reverse["direction"] = "reverse";
+                            reverse["probedBecause"] = "the forward crossing did not always land";
+                            seams.Add((JsonNode)reverse);
+                        }
                     }
                 }
 
@@ -248,7 +276,16 @@ internal static class Probe
 
                     if (right - left > SeamOffset * 4)
                     {
-                        seams.Add((JsonNode)HorizontalSeam(topMonitor, bottomMonitor, left, right));
+                        var forward = HorizontalSeam(topMonitor, bottomMonitor, left, right);
+                        seams.Add((JsonNode)forward);
+
+                        if (Crossed(forward) < SeamPoints)
+                        {
+                            var reverse = HorizontalSeam(bottomMonitor, topMonitor, left, right);
+                            reverse["direction"] = "reverse";
+                            reverse["probedBecause"] = "the forward crossing did not always land";
+                            seams.Add((JsonNode)reverse);
+                        }
                     }
                 }
             }
@@ -287,6 +324,7 @@ internal static class Probe
         return new JsonObject
         {
             ["kind"] = "vertical",
+            ["direction"] = "forward",
             ["from"] = left.Index,
             ["to"] = right.Index,
             ["x"] = left.Rect.Right,
@@ -325,6 +363,7 @@ internal static class Probe
         return new JsonObject
         {
             ["kind"] = "horizontal",
+            ["direction"] = "forward",
             ["from"] = topMonitor.Index,
             ["to"] = bottomMonitor.Index,
             ["y"] = topMonitor.Rect.Bottom,
@@ -337,37 +376,51 @@ internal static class Probe
     {
         var bounds = Monitors.VirtualBounds();
         var step = Math.Max(48, Math.Max(bounds.W, bounds.H) / 60);
-        var found = new JsonArray();
 
-        for (var y = bounds.Y; y < bounds.Bottom && found.Count < 5; y += step)
+        // Collect candidates over the whole desktop first: stopping at the first
+        // five would only ever report one corner of one gap.
+        var candidates = new List<PointI>();
+        for (var y = bounds.Y; y < bounds.Bottom; y += step)
         {
-            for (var x = bounds.X; x < bounds.Right && found.Count < 5; x += step)
+            for (var x = bounds.X; x < bounds.Right; x += step)
             {
                 var point = new PointI(x, y);
-                if (Monitors.AnyContains(point))
+                if (!Monitors.AnyContains(point))
                 {
-                    continue;
+                    candidates.Add(point);
                 }
-
-                var rejected = false;
-                string? code = null;
-                try
-                {
-                    _ = Monitors.Require(point);
-                }
-                catch (CliError error)
-                {
-                    rejected = true;
-                    code = error.Code;
-                }
-
-                found.Add((JsonNode)new JsonObject
-                {
-                    ["point"] = Out.Point(point),
-                    ["rejected"] = rejected,
-                    ["code"] = code,
-                });
             }
+        }
+
+        var found = new JsonArray();
+        if (candidates.Count == 0)
+        {
+            return found;
+        }
+
+        var picks = Math.Min(5, candidates.Count);
+        for (var i = 0; i < picks; i++)
+        {
+            var point = candidates[(int)((long)i * candidates.Count / picks)];
+            var rejected = false;
+            string? code = null;
+
+            try
+            {
+                _ = Monitors.Require(point);
+            }
+            catch (CliError error)
+            {
+                rejected = true;
+                code = error.Code;
+            }
+
+            found.Add((JsonNode)new JsonObject
+            {
+                ["point"] = Out.Point(point),
+                ["rejected"] = rejected,
+                ["code"] = code,
+            });
         }
 
         return found;
@@ -428,6 +481,8 @@ internal static class Probe
 
         return checks;
     }
+
+    private static int Crossed(JsonObject seam) => (int)(seam["crossed"]?.GetValue<int>() ?? 0);
 
     private static string Verdict(JsonObject report)
     {
