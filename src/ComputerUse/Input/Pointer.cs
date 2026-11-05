@@ -27,7 +27,7 @@ internal static class Pointer
     private const int PollIntervalMs = 4;
     private const int StableReads = 3;
     private const int PollBudgetMs = 400;
-    private const int ClipWaitBudgetMs = 400;
+    private const int ClipWaitBudgetMs = 500;
     private const int ClipPollMs = 20;
 
     public static PointI Get()
@@ -109,7 +109,7 @@ internal static class Pointer
 
             if (MaxDistance(landed, target) <= tolerance)
             {
-                return new MoveReport(target, landed, attempts, strategy.Name);
+                return new MoveReport(target, landed, attempts, strategy.Name) { ClipWaitMs = clipWaitMs };
             }
 
             // A cursor that is clipped to a rectangle excluding the target cannot be moved
@@ -127,10 +127,23 @@ internal static class Pointer
                 }
 
                 clipWaitMs += released;
+
+                // The clip was the only reason this attempt failed: try it again on its own
+                // terms rather than escalating to a strategy that moves the cursor differently.
+                strategy.Apply(target);
+                landed = WaitStable();
+
+                if (MaxDistance(landed, target) <= tolerance)
+                {
+                    return new MoveReport(target, landed, attempts, strategy.Name + "+after-clip")
+                    {
+                        ClipWaitMs = clipWaitMs,
+                    };
+                }
             }
         }
 
-        return new MoveReport(target, landed, attempts, "failed");
+        return new MoveReport(target, landed, attempts, "failed") { ClipWaitMs = clipWaitMs };
     }
 
     /// <summary>Moves or throws with a classified diagnosis.</summary>

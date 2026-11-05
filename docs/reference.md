@@ -461,7 +461,8 @@ Pointer actions:
 | `landedScreen` | `{x,y}` that same position in desktop physical pixels |
 | `delta` | distance in pixels between `requested` and `landed`, as the larger of the two axis differences; `0` when exact |
 | `attempts` | how many placement attempts were made (at least 1) |
-| `strategy` | identifier of the mechanism that produced the landing; diagnostics only — never branch on it |
+| `strategy` | identifier of the mechanism that produced the landing (`sendinput`, `sendinput-retry`, `setcursorpos`, `waypoints`, `route`, `sendinput+after-clip`, `clipped`); diagnostics only — never branch on it |
+| `clipWaitMs` | present when the cursor was confined to a rectangle that excluded the target and the move waited for that confinement to lift; the move then succeeded and this is how long it waited |
 | `pointerAfter` | `{x,y}` cursor position after the whole action, desktop pixels |
 
 Keyboard actions: `keyboard type` returns `text` (echoed, truncated past 200
@@ -495,7 +496,7 @@ result needs care:
 | `NotFound` | 2 | the selector or handle matched no window, or the monitor index does not exist | re-list with `window list` / `screen info` |
 | `Ambiguous` | 2 | a single-window selector matched several windows; `error.context` lists them | narrow the glob, or use `window find --index` and an explicit `hwnd:` |
 | `PointNotOnMonitor` | 2 | the point is not inside any monitor rectangle | re-read `screen info`; never interpolate across a gap |
-| `PointerNotLanded` | 2 | after every strategy the cursor was still outside `--tolerance` | read `error.context.causes` (`dpi-scale`, `edge-crossing`, `dead-zone`, `input-hook`) and `error.hints`, recapture, retry once, then report |
+| `PointerNotLanded` | 2 | after every strategy the cursor was still outside `--tolerance` | read `error.context.causes` (`cursor-clipped`, `dpi-scale`, `edge-crossing`, `dead-zone`, `input-hook`) and `error.hints`, recapture, retry once, then report. `cursor-clipped` means the OS confined the cursor to a rectangle that excludes the target (a game, a remote-desktop client or a mouse manager set it) — retry later, the confinement is usually temporary |
 | `CaptureBlank` | 2 | the capture contained no usable pixels | raise the window, add `--settle`, or capture the `--monitor` instead |
 | `CaptureFailed` | 2 | the OS refused the capture (invalid target, protected window, resource failure) | see `error.message`; try a crop or the `--monitor` |
 | `DpiAwarenessRequired` | 2 | per-monitor-v2 DPI awareness could not be enabled | the tool refuses to emit coordinates it cannot trust; run it from a normal interactive desktop session |
