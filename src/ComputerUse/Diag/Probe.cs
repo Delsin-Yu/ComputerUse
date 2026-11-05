@@ -17,6 +17,7 @@ internal static class Probe
 {
     private const int SeamOffset = 24;
     private const int SeamPoints = 5;
+    private const int ReversePoints = 3;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SystemParametersInfo(uint action, uint param, out int value, uint winIni);
@@ -45,10 +46,31 @@ internal static class Probe
             ["clipCursor"] = clipAtStart,
         };
 
+        // Phase timings: "the probe got slower" should be answerable without guessing.
+        var phase = Stopwatch.StartNew();
+
         report["mapping"] = Mapping(monitors, samples);
+        var mappingMs = phase.ElapsedMilliseconds;
+
+        phase.Restart();
         report["seams"] = Seams(monitors);
+        var seamsMs = phase.ElapsedMilliseconds;
+
+        phase.Restart();
         report["deadZones"] = DeadZones();
+        var deadZoneMs = phase.ElapsedMilliseconds;
+
+        phase.Restart();
         report["capture"] = CaptureChecks();
+        var captureMs = phase.ElapsedMilliseconds;
+
+        report["timings"] = new JsonObject
+        {
+            ["mappingMs"] = mappingMs,
+            ["seamsMs"] = seamsMs,
+            ["deadZoneMs"] = deadZoneMs,
+            ["captureMs"] = captureMs,
+        };
 
         // Read again: a clip rect can be set and released by whatever owns the
         // foreground, so a single reading at the start can contradict the probes.
@@ -154,19 +176,7 @@ internal static class Probe
 
     private static JsonNode? ClipCursor()
     {
-        if (!NativeInput.GetClipCursor(out var rect))
-        {
-            return null;
-        }
-
-        var bounds = Monitors.VirtualBounds();
-        if (rect.Left == 0 && rect.Top == 0 && rect.Right == 0 && rect.Bottom == 0)
-        {
-            return null;
-        }
-
-        var clip = new RectI(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
-        if (clip == bounds)
+        if (Pointer.ActiveClip() is not { } clip)
         {
             return null;
         }
@@ -245,22 +255,25 @@ internal static class Probe
                 var a = monitors[i];
                 var b = monitors[j];
 
+                // A vertical seam is one x where two panels touch, and the overlap is the
+                // stretch of y they share. Probing "the reverse direction" means walking
+                // back across that same x, not jumping from the far edge of the other panel.
                 if (a.Rect.Right == b.Rect.X || b.Rect.Right == a.Rect.X)
                 {
                     var left = a.Rect.Right == b.Rect.X ? a : b;
                     var right = ReferenceEquals(left, a) ? b : a;
+                    var seamX = left.Rect.Right;
                     var top = Math.Max(left.Rect.Y, right.Rect.Y);
                     var bottom = Math.Min(left.Rect.Bottom, right.Rect.Bottom);
 
                     if (bottom - top > SeamOffset * 4)
                     {
-                        var forward = VerticalSeam(left, right, top, bottom);
+                        var forward = VerticalSeam(left.Index, right.Index, seamX, top, bottom, forward: true, SeamPoints);
                         seams.Add((JsonNode)forward);
 
                         if (Crossed(forward) < SeamPoints)
                         {
-                            var reverse = VerticalSeam(right, left, top, bottom);
-                            reverse["direction"] = "reverse";
+                            var reverse = VerticalSeam(right.Index, left.Index, seamX, top, bottom, forward: false, ReversePoints);
                             reverse["probedBecause"] = "the forward crossing did not always land";
                             seams.Add((JsonNode)reverse);
                         }
@@ -271,18 +284,18 @@ internal static class Probe
                 {
                     var topMonitor = a.Rect.Bottom == b.Rect.Y ? a : b;
                     var bottomMonitor = ReferenceEquals(topMonitor, a) ? b : a;
+                    var seamY = topMonitor.Rect.Bottom;
                     var left = Math.Max(topMonitor.Rect.X, bottomMonitor.Rect.X);
                     var right = Math.Min(topMonitor.Rect.Right, bottomMonitor.Rect.Right);
 
                     if (right - left > SeamOffset * 4)
                     {
-                        var forward = HorizontalSeam(topMonitor, bottomMonitor, left, right);
+                        var forward = HorizontalSeam(topMonitor.Index, bottomMonitor.Index, seamY, left, right, forward: true, SeamPoints);
                         seams.Add((JsonNode)forward);
 
                         if (Crossed(forward) < SeamPoints)
                         {
-                            var reverse = HorizontalSeam(bottomMonitor, topMonitor, left, right);
-                            reverse["direction"] = "reverse";
+                            var reverse = HorizontalSeam(bottomMonitor.Index, topMonitor.Index, seamY, left, right, forward: false, ReversePoints);
                             reverse["probedBecause"] = "the forward crossing did not always land";
                             seams.Add((JsonNode)reverse);
                         }
@@ -294,16 +307,21 @@ internal static class Probe
         return seams;
     }
 
-    private static JsonObject VerticalSeam(MonitorInfo left, MonitorInfo right, int top, int bottom)
+    /// <summary>
+    /// Crosses <paramref name="seamX"/> from one side to the other at several heights. The seam
+    /// coordinate is passed in rather than derived from a monitor, so the reverse direction walks
+    /// back over the same line instead of jumping across the whole desktop.
+    /// </summary>
+    private static JsonObject VerticalSeam(int fromIndex, int toIndex, int seamX, int top, int bottom, bool forward, int points)
     {
-        var points = new JsonArray();
+        var marks = new JsonArray();
         var crossed = 0;
 
-        for (var k = 1; k <= SeamPoints; k++)
+        for (var k = 1; k <= points; k++)
         {
-            var y = top + ((bottom - top) * k / (SeamPoints + 1));
-            var from = new PointI(left.Rect.Right - SeamOffset, y);
-            var to = new PointI(right.Rect.X + SeamOffset, y);
+            var y = top + ((bottom - top) * k / (points + 1));
+            var from = new PointI(forward ? seamX - SeamOffset : seamX + SeamOffset, y);
+            var to = new PointI(forward ? seamX + SeamOffset : seamX - SeamOffset, y);
 
             _ = Pointer.Move(from, 1);
             var report = Pointer.Move(to, 1);
@@ -312,37 +330,32 @@ internal static class Probe
                 crossed++;
             }
 
-            points.Add((JsonNode)new JsonObject
-            {
-                ["from"] = Out.Point(from),
-                ["requested"] = Out.Point(to),
-                ["landed"] = Out.Point(report.Landed),
-                ["delta"] = report.Delta,
-            });
+            marks.Add((JsonNode)Crossing(from, to, report));
         }
 
         return new JsonObject
         {
             ["kind"] = "vertical",
-            ["direction"] = "forward",
-            ["from"] = left.Index,
-            ["to"] = right.Index,
-            ["x"] = left.Rect.Right,
-            ["crossed"] = crossed,
+            ["direction"] = forward ? "forward" : "reverse",
+            ["from"] = fromIndex,
+            ["to"] = toIndex,
+            ["x"] = seamX,
             ["points"] = points,
+            ["crossed"] = crossed,
+            ["marks"] = marks,
         };
     }
 
-    private static JsonObject HorizontalSeam(MonitorInfo topMonitor, MonitorInfo bottomMonitor, int left, int right)
+    private static JsonObject HorizontalSeam(int fromIndex, int toIndex, int seamY, int left, int right, bool forward, int points)
     {
-        var points = new JsonArray();
+        var marks = new JsonArray();
         var crossed = 0;
 
-        for (var k = 1; k <= SeamPoints; k++)
+        for (var k = 1; k <= points; k++)
         {
-            var x = left + ((right - left) * k / (SeamPoints + 1));
-            var from = new PointI(x, topMonitor.Rect.Bottom - SeamOffset);
-            var to = new PointI(x, bottomMonitor.Rect.Y + SeamOffset);
+            var x = left + ((right - left) * k / (points + 1));
+            var from = new PointI(x, forward ? seamY - SeamOffset : seamY + SeamOffset);
+            var to = new PointI(x, forward ? seamY + SeamOffset : seamY - SeamOffset);
 
             _ = Pointer.Move(from, 1);
             var report = Pointer.Move(to, 1);
@@ -351,25 +364,46 @@ internal static class Probe
                 crossed++;
             }
 
-            points.Add((JsonNode)new JsonObject
-            {
-                ["from"] = Out.Point(from),
-                ["requested"] = Out.Point(to),
-                ["landed"] = Out.Point(report.Landed),
-                ["delta"] = report.Delta,
-            });
+            marks.Add((JsonNode)Crossing(from, to, report));
         }
 
         return new JsonObject
         {
             ["kind"] = "horizontal",
-            ["direction"] = "forward",
-            ["from"] = topMonitor.Index,
-            ["to"] = bottomMonitor.Index,
-            ["y"] = topMonitor.Rect.Bottom,
-            ["crossed"] = crossed,
+            ["direction"] = forward ? "forward" : "reverse",
+            ["from"] = fromIndex,
+            ["to"] = toIndex,
+            ["y"] = seamY,
             ["points"] = points,
+            ["crossed"] = crossed,
+            ["marks"] = marks,
         };
+    }
+
+    private static JsonObject Crossing(PointI from, PointI to, MoveReport report)
+    {
+        var mark = new JsonObject
+        {
+            ["from"] = Out.Point(from),
+            ["requested"] = Out.Point(to),
+            ["landed"] = Out.Point(report.Landed),
+            ["delta"] = report.Delta,
+            ["strategy"] = report.Strategy,
+        };
+
+        // When a crossing lands short, whether a clip rectangle was in force decides the
+        // explanation: a clip that excludes the target makes the move impossible, and a hook
+        // that repositions the cursor leaves no clip behind.
+        if (report.Delta > 2)
+        {
+            var clip = ClipCursor();
+            if (clip is not null)
+            {
+                mark["clipCursorAtFailure"] = clip.DeepClone();
+            }
+        }
+
+        return mark;
     }
 
     private static JsonArray DeadZones()

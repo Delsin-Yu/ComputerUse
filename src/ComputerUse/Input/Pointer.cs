@@ -92,6 +92,13 @@ internal static class Pointer
             {
                 return new MoveReport(target, landed, attempts, strategy.Name);
             }
+
+            // A cursor that is clipped to a rectangle excluding the target cannot be moved
+            // there by any strategy. Say so instead of burning the walk and route attempts.
+            if (ActiveClip() is { } clip && !clip.Contains(target))
+            {
+                return new MoveReport(target, landed, attempts, "clipped");
+            }
         }
 
         return new MoveReport(target, landed, attempts, "failed");
@@ -153,6 +160,18 @@ internal static class Pointer
 
     public static string[] Diagnose(PointI requested, PointI landed, out string[] causes)
     {
+        if (ActiveClip() is { } clip && !clip.Contains(requested))
+        {
+            causes = ["cursor-clipped"];
+            return
+            [
+                $"the cursor is confined to {clip.X},{clip.Y} {clip.W}x{clip.H} and the target is outside it, "
+                + "so no move can land there while that clip is in force",
+                "the clip is set by whatever owns the pointer: a game, a remote-desktop client, or a mouse manager",
+                "retry when the clip is released; if it never is, that rectangle genuinely cannot be reached",
+            ];
+        }
+
         if (!Monitors.AnyContains(landed))
         {
             causes = ["dead-zone"];
@@ -205,6 +224,23 @@ internal static class Pointer
     }
 
     public static int MaxDistance(PointI a, PointI b) => Math.Max(Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
+
+    /// <summary>The rectangle the cursor is confined to right now, or null when it is free.</summary>
+    public static RectI? ActiveClip()
+    {
+        if (!NativeInput.GetClipCursor(out var rect))
+        {
+            return null;
+        }
+
+        if (rect.Left == 0 && rect.Top == 0 && rect.Right == 0 && rect.Bottom == 0)
+        {
+            return null;
+        }
+
+        var clip = new RectI(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        return clip == Monitors.VirtualBounds() ? null : clip;
+    }
 
     /// <summary>One absolute move with no verification, for intermediate drag steps.</summary>
     public static void Jump(PointI target) => AbsoluteSend(target);
