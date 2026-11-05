@@ -66,7 +66,7 @@ mouse up    --button left|right|middle
 
     public const string Keyboard = """
 keyboard type (--text <s> | --text-file <path> | --text-b64 <b64>) [--window <sel>] [--delay-ms 0] [--method unicode|scan]
-keyboard press <combo> [--window <sel>] [--repeat 1] [--delay-ms 0]
+keyboard press <combo> [--window <sel>] [--repeat 1] [--delay-ms 0] [--method vk|scan]
 keyboard press --hold <key> | --release <key> [--window <sel>]
 """;
 }

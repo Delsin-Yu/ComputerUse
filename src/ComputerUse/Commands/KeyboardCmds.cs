@@ -72,6 +72,13 @@ internal static class KeyboardCmds
 
         var hold = args.Get("--hold");
         var release = args.Get("--release");
+        var scanCode = (args.Get("--method") ?? "vk").ToLowerInvariant() switch
+        {
+            "vk" or "virtual" or "virtualkey" => false,
+            "scan" or "scancode" => true,
+            var other => throw new UsageException(
+                $"--method '{other}' is not valid for a named key; use vk or scan.", Usage.Keyboard),
+        };
 
         if (hold is not null && release is not null)
         {
@@ -90,14 +97,14 @@ internal static class KeyboardCmds
 
         if (hold is not null)
         {
-            Keyboard.Down(hold);
+            Keyboard.Down(hold, scanCode);
             response.Root["input"] = new JsonObject { ["hold"] = hold };
             return response.Emit();
         }
 
         if (release is not null)
         {
-            Keyboard.Up(release);
+            Keyboard.Up(release, scanCode);
             response.Root["input"] = new JsonObject { ["release"] = release };
             return response.Emit();
         }
@@ -111,13 +118,14 @@ internal static class KeyboardCmds
         var repeat = args.IntOr("--repeat", 1);
         var delay = args.IntOr("--delay-ms", 0);
 
-        Keyboard.Press(combo, repeat, delay);
+        Keyboard.Press(combo, repeat, delay, scanCode);
 
         response.Root["input"] = new JsonObject
         {
             ["combo"] = combo,
             ["repeat"] = repeat,
             ["delayMs"] = delay,
+            ["method"] = scanCode ? "scan" : "vk",
         };
 
         return response.Emit();

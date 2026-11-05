@@ -94,7 +94,7 @@ internal static class Keyboard
     /// <paramref name="repeat"/> times with <paramref name="delayMs"/> between repeats.
     /// </summary>
     /// <exception cref="CliError">Malformed combo, unknown key, unknown modifier, or repeat out of range.</exception>
-    public static void Press(string combo, int repeat, int delayMs)
+    public static void Press(string combo, int repeat, int delayMs, bool scanCode = false)
     {
         if (repeat < 1 || repeat > 50)
         {
@@ -142,15 +142,15 @@ internal static class Keyboard
         var events = new List<InputEvent>(modifiers.Count * 2 + 2);
         foreach (var modifier in modifiers)
         {
-            events.Add(KeyEvent(modifier, up: false));
+            events.Add(KeyEvent(modifier, up: false, scanCode));
         }
 
-        events.Add(KeyEvent(key, up: false));
-        events.Add(KeyEvent(key, up: true));
+        events.Add(KeyEvent(key, up: false, scanCode));
+        events.Add(KeyEvent(key, up: true, scanCode));
 
         for (var i = modifiers.Count - 1; i >= 0; i--)
         {
-            events.Add(KeyEvent(modifiers[i], up: true));
+            events.Add(KeyEvent(modifiers[i], up: true, scanCode));
         }
 
         var sequence = events.ToArray();
@@ -168,18 +168,18 @@ internal static class Keyboard
 
     /// <summary>Presses one key down and leaves it held.</summary>
     /// <exception cref="CliError">Unknown key name, or SendInput refused the event.</exception>
-    public static void Down(string keyName)
+    public static void Down(string keyName, bool scanCode = false)
     {
         var vk = KeyMap.ToVk(keyName);
-        Send([KeyEvent(vk, up: false)]);
+        Send([KeyEvent(vk, up: false, scanCode)]);
     }
 
     /// <summary>Releases one held key.</summary>
     /// <exception cref="CliError">Unknown key name, or SendInput refused the event.</exception>
-    public static void Up(string keyName)
+    public static void Up(string keyName, bool scanCode = false)
     {
         var vk = KeyMap.ToVk(keyName);
-        Send([KeyEvent(vk, up: true)]);
+        Send([KeyEvent(vk, up: true, scanCode)]);
     }
 
     /// <summary>True when <paramref name="text"/> is a combo such as <c>ctrl+t</c>, not one key.</summary>
@@ -446,8 +446,43 @@ internal static class Keyboard
         batch.Add(UnicodeEvent(codeUnit, up: true));
     }
 
-    private static InputEvent KeyEvent(ushort vk, bool up)
+    private static InputEvent KeyEvent(ushort vk, bool up, bool scanCode = false)
     {
+        if (scanCode)
+        {
+            var code = ScanCodeOf(vk);
+            if (code == 0)
+            {
+                throw new CliError(
+                    "InvalidArgument",
+                    $"'{KeyMap.DisplayName(vk)}' has no scan code, so it cannot be sent as a scan-code event.",
+                    1,
+                    hints: ["use the default (virtual-key) method for this key"]);
+            }
+
+            var scanFlags = KeyEventScancode | (up ? KeyEventKeyUp : 0u);
+            if (KeyMap.IsExtended(vk))
+            {
+                scanFlags |= KeyEventExtendedKey;
+            }
+
+            return new InputEvent
+            {
+                Type = InputKeyboard,
+                Union = new InputEventUnion
+                {
+                    Keyboard = new KeyboardInput
+                    {
+                        VirtualKey = 0,
+                        ScanCode = code,
+                        Flags = scanFlags,
+                        Time = 0,
+                        ExtraInfo = 0,
+                    },
+                },
+            };
+        }
+
         var flags = up ? KeyEventKeyUp : 0u;
         if (KeyMap.IsExtended(vk))
         {
