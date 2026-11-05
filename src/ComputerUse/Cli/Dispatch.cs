@@ -28,7 +28,7 @@ internal static class Dispatch
                 "window" => Group(argv, "window", Usage.Window, WindowCmds.Run),
                 "mouse" => Group(argv, "mouse", Usage.Mouse, MouseCmds.Run),
                 "keyboard" => Group(argv, "keyboard", Usage.Keyboard, KeyboardCmds.Run),
-                _ => throw new UsageException($"Unknown command '{argv[0]}'.", Usage.Root),
+                _ => throw Unknown(verb),
             };
         }
         catch (UsageException error)
@@ -43,6 +43,43 @@ internal static class Dispatch
         {
             return Out.Fail(LastCommand, "RuntimeError", error.Message);
         }
+    }
+
+    /// <summary>
+    /// Subcommands belong to a group, but people (and agents) reach for the leaf name on its
+    /// own. Saying which command was meant is more useful than listing the whole grammar.
+    /// </summary>
+    private static readonly Dictionary<string, (string Path, string Help)> Subcommands =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["info"] = ("screen info", Usage.Screen),
+            ["run-probe"] = ("screen run-probe", Usage.Screen),
+            ["list"] = ("window list", Usage.Window),
+            ["find"] = ("window find", Usage.Window),
+            ["move-to-foreground"] = ("window move-to-foreground", Usage.Window),
+            ["wait"] = ("window wait", Usage.Window),
+            ["point-info"] = ("window point-info", Usage.Window),
+            ["move"] = ("mouse move", Usage.Mouse),
+            ["click"] = ("mouse click", Usage.Mouse),
+            ["drag"] = ("mouse drag", Usage.Mouse),
+            ["scroll"] = ("mouse scroll", Usage.Mouse),
+            ["down"] = ("mouse down", Usage.Mouse),
+            ["up"] = ("mouse up", Usage.Mouse),
+            ["type"] = ("keyboard type", Usage.Keyboard),
+            ["press"] = ("keyboard press", Usage.Keyboard),
+        };
+
+    private static UsageException Unknown(string verb)
+    {
+        if (Subcommands.TryGetValue(verb, out var entry))
+        {
+            LastCommand = entry.Path;
+            return new UsageException(
+                $"'{verb}' is a subcommand: use '{entry.Path}'.",
+                entry.Help);
+        }
+
+        return new UsageException($"Unknown command '{verb}'.", Usage.Root);
     }
 
     private static int Print(string text)

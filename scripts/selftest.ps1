@@ -177,15 +177,45 @@ $scriptDir = $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($scriptDir)) {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $scriptDir '..')).Path
+
+# The test has to work from three places: inside the repo, inside an unpacked
+# package (bin\computer-use.exe next to this script), and from an installed skill
+# folder. Search in that order instead of assuming a build tree exists.
+$looked = @()
 
 if ([string]::IsNullOrWhiteSpace($Exe)) {
-    $Exe = Join-Path $repoRoot 'src\ComputerUse\bin\Release\net10.0-windows\win-x64\publish\computer-use.exe'
+    $candidates = @(
+        (Join-Path $scriptDir 'bin\computer-use.exe'),
+        (Join-Path $scriptDir '..\bin\computer-use.exe'),
+        (Join-Path $env:USERPROFILE '.cursor\skills\computer-use\bin\computer-use.exe'),
+        (Join-Path $scriptDir '..\src\ComputerUse\bin\Release\net10.0-windows\win-x64\publish\computer-use.exe')
+    )
+
+    foreach ($candidate in $candidates) {
+        $looked += $candidate
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $Exe = $candidate
+            break
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Exe)) {
+        $onPath = Get-Command 'computer-use' -ErrorAction SilentlyContinue
+        if ($null -ne $onPath) {
+            $Exe = $onPath.Source
+            $looked += ('PATH: ' + $Exe)
+        }
+    }
 }
 
-if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
-    Write-Host ('FAIL  exe                    not found: ' + $Exe) -ForegroundColor Red
-    Write-Host '      build it with: dotnet publish src/ComputerUse/ComputerUse.csproj -c Release -r win-x64'
+if ([string]::IsNullOrWhiteSpace($Exe) -or -not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
+    Write-Host 'FAIL  exe                    no computer-use.exe found' -ForegroundColor Red
+    Write-Host '      looked at:'
+    foreach ($candidate in $looked) {
+        Write-Host ('        ' + $candidate)
+    }
+    Write-Host '      pass -Exe <path>, or build it with:'
+    Write-Host '        dotnet publish src/ComputerUse/ComputerUse.csproj -c Release -r win-x64'
     exit 1
 }
 
