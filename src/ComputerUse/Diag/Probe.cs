@@ -214,13 +214,29 @@ internal static class Probe
                     totalPoints++;
                     worst = Math.Max(worst, report.Delta);
 
-                    points.Add((JsonNode)new JsonObject
+                    var mark = new JsonObject
                     {
                         ["requested"] = Out.Point(point),
                         ["landed"] = Out.Point(report.Landed),
                         ["delta"] = report.Delta,
                         ["strategy"] = report.Strategy,
-                    });
+                    };
+
+                    if (report.ClipWaitMs > 0)
+                    {
+                        mark["clipWaitMs"] = report.ClipWaitMs;
+                    }
+
+                    if (report.Strategy == "clipped")
+                    {
+                        mark["clipped"] = true;
+                        if (ClipCursor() is { } blocking)
+                        {
+                            mark["clipCursorAtFailure"] = blocking.DeepClone();
+                        }
+                    }
+
+                    points.Add((JsonNode)mark);
                 }
             }
 
@@ -539,6 +555,52 @@ internal static class Probe
         if (worst == 0 && seamFailures == 0)
         {
             return "exact";
+        }
+
+        // A clipped cursor explains a failure completely: the pointer was confined to a
+        // rectangle that excludes the target, so no strategy could have landed it.
+        var clipped = 0;
+        if (seams is JsonArray seamList)
+        {
+            foreach (var seam in seamList)
+            {
+                if (seam is not JsonObject entry || entry["marks"] is not JsonArray marks)
+                {
+                    continue;
+                }
+
+                foreach (var mark in marks)
+                {
+                    if (mark is JsonObject point && point["clipCursorAtFailure"] is not null)
+                    {
+                        clipped++;
+                    }
+                }
+            }
+        }
+
+        if (mapping["perMonitor"] is JsonArray perMonitor)
+        {
+            foreach (var monitor in perMonitor)
+            {
+                if (monitor is not JsonObject entry || entry["points"] is not JsonArray points)
+                {
+                    continue;
+                }
+
+                foreach (var point in points)
+                {
+                    if (point is JsonObject mark && mark["clipped"] is not null)
+                    {
+                        clipped++;
+                    }
+                }
+            }
+        }
+
+        if (clipped > 0)
+        {
+            return "clipped-by-hook";
         }
 
         if (seamFailures > 0)

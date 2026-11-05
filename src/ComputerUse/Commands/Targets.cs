@@ -119,6 +119,11 @@ internal static class Targets
             ["pointerAfter"] = Out.Point(Pointer.Get()),
         };
 
+        if (report.ClipWaitMs > 0)
+        {
+            block["clipWaitMs"] = report.ClipWaitMs;
+        }
+
         if (extra is not null)
         {
             foreach (var pair in extra)

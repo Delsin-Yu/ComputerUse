@@ -8,6 +8,9 @@ namespace ComputerUse.Input;
 
 internal sealed record MoveReport(PointI Requested, PointI Landed, int Attempts, string Strategy)
 {
+    /// <summary>Milliseconds spent waiting for a cursor clip to release before giving up.</summary>
+    public int ClipWaitMs { get; init; }
+
     public int Delta => Math.Max(Math.Abs(Landed.X - Requested.X), Math.Abs(Landed.Y - Requested.Y));
 
     public bool Ok => Delta == 0;
@@ -24,6 +27,8 @@ internal static class Pointer
     private const int PollIntervalMs = 4;
     private const int StableReads = 3;
     private const int PollBudgetMs = 400;
+    private const int ClipWaitBudgetMs = 400;
+    private const int ClipPollMs = 20;
 
     public static PointI Get()
     {
@@ -66,6 +71,20 @@ internal static class Pointer
             throw NotOnMonitor(target);
         }
 
+        // A clip can be already in force when the move starts; it is often released a
+        // moment later, so give it a short chance before declaring the point unreachable.
+        var clipWaitMs = 0;
+        if (ActiveClip() is { } pending && !pending.Contains(target))
+        {
+            var released = WaitForClipRelease(target, ClipWaitBudgetMs);
+            if (released < 0)
+            {
+                return new MoveReport(target, Get(), 1, "clipped") { ClipWaitMs = ClipWaitBudgetMs };
+            }
+
+            clipWaitMs = released;
+        }
+
         var origin = Get();
         var attempts = 0;
         var landed = origin;
@@ -94,10 +113,20 @@ internal static class Pointer
             }
 
             // A cursor that is clipped to a rectangle excluding the target cannot be moved
-            // there by any strategy. Say so instead of burning the walk and route attempts.
+            // there by any strategy — but the clip is frequently transient, so wait for it
+            // instead of burning the walk and route attempts (and say how long we waited).
             if (ActiveClip() is { } clip && !clip.Contains(target))
             {
-                return new MoveReport(target, landed, attempts, "clipped");
+                var released = WaitForClipRelease(target, ClipWaitBudgetMs);
+                if (released < 0)
+                {
+                    return new MoveReport(target, landed, attempts, "clipped")
+                    {
+                        ClipWaitMs = clipWaitMs + ClipWaitBudgetMs,
+                    };
+                }
+
+                clipWaitMs += released;
             }
         }
 
@@ -224,6 +253,24 @@ internal static class Pointer
     }
 
     public static int MaxDistance(PointI a, PointI b) => Math.Max(Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
+
+    /// <summary>Waits until the clip stops excluding the target; -1 when it never did.</summary>
+    private static int WaitForClipRelease(PointI target, int budgetMs)
+    {
+        var watch = Stopwatch.StartNew();
+
+        while (watch.ElapsedMilliseconds < budgetMs)
+        {
+            Thread.Sleep(ClipPollMs);
+
+            if (ActiveClip() is not { } clip || clip.Contains(target))
+            {
+                return (int)watch.ElapsedMilliseconds;
+            }
+        }
+
+        return -1;
+    }
 
     /// <summary>The rectangle the cursor is confined to right now, or null when it is free.</summary>
     public static RectI? ActiveClip()
