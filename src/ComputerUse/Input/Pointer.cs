@@ -30,6 +30,12 @@ internal static class Pointer
     private const int ClipWaitBudgetMs = 500;
     private const int ClipPollMs = 20;
 
+    /// <summary>Upper bound on relative moves spent trying to release a held clip.</summary>
+    private const int NudgeMax = 12;
+
+    /// <summary>Size of one relative nudge, in pixels.</summary>
+    private const int NudgeStep = 40;
+
     public static PointI Get()
     {
         return NativeInput.GetCursorPos(out var point) ? new PointI(point.X, point.Y) : new PointI(0, 0);
@@ -267,10 +273,17 @@ internal static class Pointer
 
     public static int MaxDistance(PointI a, PointI b) => Math.Max(Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
 
-    /// <summary>Waits until the clip stops excluding the target; -1 when it never did.</summary>
+    /// <summary>
+    /// Waits until the clip stops excluding the target; -1 when it never did.
+    /// Waiting on its own does not lift a clip that an input hook is holding: measured on this
+    /// machine with LittleBigMouse running, the pointer stayed confined to DISPLAY1 for 40 s of
+    /// complete input silence, while the first 40 px relative move released the clip within
+    /// ~120 ms. So move instead of only waiting.
+    /// </summary>
     private static int WaitForClipRelease(PointI target, int budgetMs)
     {
         var watch = Stopwatch.StartNew();
+        var nudges = 0;
 
         while (watch.ElapsedMilliseconds < budgetMs)
         {
@@ -280,9 +293,46 @@ internal static class Pointer
             {
                 return (int)watch.ElapsedMilliseconds;
             }
+
+            if (nudges < NudgeMax)
+            {
+                NudgeInside(clip, nudges);
+                nudges++;
+            }
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// A relative move that the clip cannot swallow: toward the middle of the confinement, so
+    /// the pointer actually travels. Nudging along a clipped axis (the first version pushed
+    /// horizontally at a pointer pinned on a left or right edge) moves nothing and releases
+    /// nothing — measured on this machine, a pointer pinned on DISPLAY4's right edge kept its
+    /// clip for the whole 500 ms.
+    /// </summary>
+    private static void NudgeInside(RectI clip, int index)
+    {
+        var current = Get();
+        var dx = Math.Sign(clip.CenterX - current.X) * NudgeStep;
+        var dy = Math.Sign(clip.CenterY - current.Y) * NudgeStep;
+
+        // Alternate the axis so the pointer moves in both directions, not along one line.
+        var moveX = index % 2 == 0 ? dx : 0;
+        var moveY = index % 2 == 0 ? 0 : dy;
+
+        if (moveX == 0 && moveY == 0)
+        {
+            moveX = index % 4 < 2 ? NudgeStep : -NudgeStep;
+        }
+
+        NudgeRelative(moveX, moveY);
+    }
+
+    /// <summary>One relative move: motion, not a teleport. Hooks that track movement reset on it.</summary>
+    private static void NudgeRelative(int dx, int dy)
+    {
+        NativeInput.Send(NativeInput.MouseEvent(NativeInput.MouseMove, dx, dy));
     }
 
     /// <summary>The rectangle the cursor is confined to right now, or null when it is free.</summary>
