@@ -236,6 +236,11 @@ internal static class Probe
                         }
                     }
 
+                    if (report.Frozen)
+                    {
+                        mark["frozen"] = true;
+                    }
+
                     points.Add((JsonNode)mark);
                 }
             }
@@ -555,6 +560,33 @@ internal static class Probe
         if (worst == 0 && seamFailures == 0)
         {
             return "exact";
+        }
+
+        // A pinned pointer explains everything below it: the confinement refused points that
+        // were never reachable, so naming the freeze is more useful than naming each clip.
+        var frozen = 0;
+        if (mapping["perMonitor"] is JsonArray frozenScan)
+        {
+            foreach (var monitor in frozenScan)
+            {
+                if (monitor is not JsonObject entry || entry["points"] is not JsonArray points)
+                {
+                    continue;
+                }
+
+                foreach (var point in points)
+                {
+                    if (point is JsonObject mark && mark["frozen"] is not null)
+                    {
+                        frozen++;
+                    }
+                }
+            }
+        }
+
+        if (frozen > 0)
+        {
+            return "pointer-frozen";
         }
 
         // A clipped cursor explains a failure completely: the pointer was confined to a

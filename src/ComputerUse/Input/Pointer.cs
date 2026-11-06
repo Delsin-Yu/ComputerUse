@@ -11,6 +11,9 @@ internal sealed record MoveReport(PointI Requested, PointI Landed, int Attempts,
     /// <summary>Milliseconds spent waiting for a cursor clip to release before giving up.</summary>
     public int ClipWaitMs { get; init; }
 
+    /// <summary>The pointer is pinned: different targets keep being refused by the same clip.</summary>
+    public bool Frozen { get; init; }
+
     public int Delta => Math.Max(Math.Abs(Landed.X - Requested.X), Math.Abs(Landed.Y - Requested.Y));
 
     public bool Ok => Delta == 0;
@@ -35,6 +38,69 @@ internal static class Pointer
 
     /// <summary>Size of one relative nudge, in pixels.</summary>
     private const int NudgeStep = 40;
+
+    /// <summary>
+    /// How many different, refused targets make a pinned pointer: three moves that asked for
+    /// three different points and were each held by a clip that the nudges never lifted cannot
+    /// be a coincidence, and paying the 500 ms budget again for every further point costs
+    /// seconds and hides the cause.
+    /// </summary>
+    private const int FreezeSamples = 3;
+
+    private static readonly Queue<(PointI Requested, PointI Landed)> ClipFailures = new();
+    private static bool pinned;
+
+    /// <summary>Records a refused move; true when the pointer has been pinned by the same clip.</summary>
+    private static bool RegisterClipFailure(PointI requested, PointI landed)
+    {
+        ClipFailures.Enqueue((requested, landed));
+        while (ClipFailures.Count > FreezeSamples)
+        {
+            ClipFailures.Dequeue();
+        }
+
+        if (ClipFailures.Count < FreezeSamples)
+        {
+            return false;
+        }
+
+        var items = ClipFailures.ToArray();
+
+        // The same target retried is not a freeze; different targets landing on one pixel is.
+        if (items.Select(item => item.Requested).Distinct().Count() < FreezeSamples)
+        {
+            return false;
+        }
+
+        pinned = true;
+        return true;
+    }
+
+    private static void ClearFreeze()
+    {
+        pinned = false;
+        ClipFailures.Clear();
+    }
+
+    /// <summary>Motion first, teleport second: a hook that holds the pointer resets on movement.</summary>
+    private static void Unstick(PointI target)
+    {
+        if (ActiveClip() is { } clip)
+        {
+            NudgeInside(clip, 0);
+            Thread.Sleep(20);
+            NudgeInside(clip, 1);
+        }
+        else
+        {
+            NudgeRelative(NudgeStep, 0);
+            Thread.Sleep(20);
+            NudgeRelative(-NudgeStep, 0);
+        }
+
+        Thread.Sleep(20);
+        AbsoluteSend(target);
+    }
 
     public static PointI Get()
     {
@@ -77,6 +143,23 @@ internal static class Pointer
             throw NotOnMonitor(target);
         }
 
+        // Already pinned earlier in this command: one cheap unstick attempt, then answer
+        // honestly and immediately. Re-paying the clip budget for every remaining point is
+        // what turned one pinned pointer into 27 x 500 ms of waiting on this machine.
+        if (pinned)
+        {
+            Unstick(target);
+            var thawed = WaitStable();
+
+            if (MaxDistance(thawed, target) <= tolerance)
+            {
+                ClearFreeze();
+                return new MoveReport(target, thawed, 1, "sendinput+after-freeze");
+            }
+
+            return new MoveReport(target, thawed, 1, "frozen") { Frozen = true };
+        }
+
         // A clip can be already in force when the move starts; it is often released a
         // moment later, so give it a short chance before declaring the point unreachable.
         var clipWaitMs = 0;
@@ -85,7 +168,13 @@ internal static class Pointer
             var released = WaitForClipRelease(target, ClipWaitBudgetMs);
             if (released < 0)
             {
-                return new MoveReport(target, Get(), 1, "clipped") { ClipWaitMs = ClipWaitBudgetMs };
+                var stuck = Get();
+                var stillPinned = RegisterClipFailure(target, stuck);
+                return new MoveReport(target, stuck, 1, "clipped")
+                {
+                    ClipWaitMs = ClipWaitBudgetMs,
+                    Frozen = stillPinned,
+                };
             }
 
             clipWaitMs = released;
@@ -115,6 +204,7 @@ internal static class Pointer
 
             if (MaxDistance(landed, target) <= tolerance)
             {
+                ClearFreeze();
                 return new MoveReport(target, landed, attempts, strategy.Name) { ClipWaitMs = clipWaitMs };
             }
 
@@ -126,9 +216,11 @@ internal static class Pointer
                 var released = WaitForClipRelease(target, ClipWaitBudgetMs);
                 if (released < 0)
                 {
+                    var stillPinned = RegisterClipFailure(target, landed);
                     return new MoveReport(target, landed, attempts, "clipped")
                     {
                         ClipWaitMs = clipWaitMs + ClipWaitBudgetMs,
+                        Frozen = stillPinned,
                     };
                 }
 
@@ -141,6 +233,7 @@ internal static class Pointer
 
                 if (MaxDistance(landed, target) <= tolerance)
                 {
+                    ClearFreeze();
                     return new MoveReport(target, landed, attempts, strategy.Name + "+after-clip")
                     {
                         ClipWaitMs = clipWaitMs,
@@ -149,7 +242,12 @@ internal static class Pointer
             }
         }
 
-        return new MoveReport(target, landed, attempts, "failed") { ClipWaitMs = clipWaitMs };
+        var pinnedNow = RegisterClipFailure(target, landed);
+        return new MoveReport(target, landed, attempts, pinnedNow ? "frozen" : "failed")
+        {
+            ClipWaitMs = clipWaitMs,
+            Frozen = pinnedNow,
+        };
     }
 
     /// <summary>Moves or throws with a classified diagnosis.</summary>
@@ -159,6 +257,32 @@ internal static class Pointer
         if (MaxDistance(report.Landed, target) > tolerance)
         {
             var hints = Diagnose(report.Requested, report.Landed, out var causes);
+
+            if (report.Frozen)
+            {
+                throw new CliError(
+                    "PointerFrozen",
+                    $"{action}: the pointer is pinned at {report.Landed} — different targets keep being "
+                    + "refused by the same cursor confinement, so further attempts would only repeat it.",
+                    context: new JsonObject
+                    {
+                        ["requested"] = Out.Point(report.Requested),
+                        ["landed"] = Out.Point(report.Landed),
+                        ["delta"] = report.Delta,
+                        ["attempts"] = report.Attempts,
+                        ["strategy"] = report.Strategy,
+                        ["landedMonitor"] = Monitors.At(report.Landed)?.Index,
+                        ["pinnedAt"] = Out.Point(report.Landed),
+                        ["clip"] = ActiveClip() is { } clip ? Out.Rect(clip) : null,
+                        ["causes"] = Out.Strings(causes),
+                    },
+                    hints:
+                    [
+                        "a mouse manager or remote-desktop host is holding the pointer: the clip it sets excludes the target",
+                        "small relative moves often release it; this command already tried that",
+                        "move the pointer by hand once (or restart the mouse manager) and retry",
+                    ]);
+            }
 
             throw new CliError(
                 "PointerNotLanded",
@@ -278,7 +402,8 @@ internal static class Pointer
     /// Waiting on its own does not lift a clip that an input hook is holding: measured on this
     /// machine with LittleBigMouse running, the pointer stayed confined to DISPLAY1 for 40 s of
     /// complete input silence, while the first 40 px relative move released the clip within
-    /// ~120 ms. So move instead of only waiting.
+    /// ~120 ms. So move, and keep the displacements small and alternating so the net travel is
+    /// about zero; the absolute move that follows decides where the pointer ends up.
     /// </summary>
     private static int WaitForClipRelease(PointI target, int budgetMs)
     {

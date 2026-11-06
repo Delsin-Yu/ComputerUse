@@ -231,7 +231,12 @@ Returns `report`:
 | --- | --- |
 | `monitors` | the monitors as probed, with their measured DPI and scale |
 | `mapping` | the per-monitor result of checking that the reported rectangle matches what a capture actually contains (origin, size, `pxPerPoint`) |
-| `verdict` | one human-readable line summarising the probe; print it, do not parse it |
+| `verdict` | one human-readable line summarising the probe; print it, do not parse it: `exact`, `approximate-within-tolerance`, `remapped`, `blocked-at-seam`, `clipped-by-hook`, `pointer-frozen` |
+
+A mapping point carries `strategy` and, when it applies, `clipWaitMs`, `clipped` and
+`frozen`. `frozen` means the pointer had already refused three different targets and
+the command stopped paying the clip budget for every further point — the pointer is
+being held, not mis-aimed.
 
 Run it when aiming feels wrong on a mixed-DPI or multi-monitor machine.
 
@@ -461,7 +466,7 @@ Pointer actions:
 | `landedScreen` | `{x,y}` that same position in desktop physical pixels |
 | `delta` | distance in pixels between `requested` and `landed`, as the larger of the two axis differences; `0` when exact |
 | `attempts` | how many placement attempts were made (at least 1) |
-| `strategy` | identifier of the mechanism that produced the landing (`sendinput`, `sendinput-retry`, `setcursorpos`, `waypoints`, `route`, `sendinput+after-clip`, `clipped`); diagnostics only — never branch on it |
+| `strategy` | identifier of the mechanism that produced the landing (`sendinput`, `sendinput-retry`, `setcursorpos`, `waypoints`, `route`, `sendinput+after-clip`, `sendinput+after-freeze`, `clipped`, `frozen`); diagnostics only — never branch on it |
 | `clipWaitMs` | present when the cursor was confined to a rectangle that excluded the target and the move waited for that confinement to lift; the move then succeeded and this is how long it waited |
 | `pointerAfter` | `{x,y}` cursor position after the whole action, desktop pixels |
 
@@ -497,6 +502,7 @@ result needs care:
 | `Ambiguous` | 2 | a single-window selector matched several windows; `error.context` lists them | narrow the glob, or use `window find --index` and an explicit `hwnd:` |
 | `PointNotOnMonitor` | 2 | the point is not inside any monitor rectangle | re-read `screen info`; never interpolate across a gap |
 | `PointerNotLanded` | 2 | after every strategy the cursor was still outside `--tolerance` | read `error.context.causes` (`cursor-clipped`, `dpi-scale`, `edge-crossing`, `dead-zone`, `input-hook`) and `error.hints`, recapture, retry once, then report. `cursor-clipped` means the OS confined the cursor to a rectangle that excludes the target (a game, a remote-desktop client or a mouse manager set it) — retry later, the confinement is usually temporary |
+| `PointerFrozen` | 2 | different targets kept being refused by the same confinement, so the command stopped retrying instead of waiting again for each one | `error.context.pinnedAt` is where the pointer is stuck and `clip` the confinement around it. A mouse manager is holding it: move the pointer by hand once (or restart that manager) and retry. Nothing was clicked |
 | `CaptureBlank` | 2 | the capture contained no usable pixels | raise the window, add `--settle`, or capture the `--monitor` instead |
 | `CaptureFailed` | 2 | the OS refused the capture (invalid target, protected window, resource failure) | see `error.message`; try a crop or the `--monitor` |
 | `DpiAwarenessRequired` | 2 | per-monitor-v2 DPI awareness could not be enabled | the tool refuses to emit coordinates it cannot trust; run it from a normal interactive desktop session |
