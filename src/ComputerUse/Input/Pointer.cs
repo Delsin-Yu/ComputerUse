@@ -258,12 +258,25 @@ internal static class Pointer
         {
             var hints = Diagnose(report.Requested, report.Landed, out var causes);
 
-            if (report.Frozen)
+            // Raise this whenever the failure is a confinement that outlived the wait and the
+            // nudges: that is a pinned pointer whether or not three points had time to prove it.
+            // (Before this, a single click could never reach this branch, so the error code was
+            // documented but unreachable.)
+            if (report.Frozen || report.Strategy is "clipped" or "frozen")
             {
+                // A confinement is the common cause, but not the only one: the freeze is
+                // "three different targets all refused", which is also what a pointer that
+                // simply stopped answering looks like. Say which case was observed.
+                var clip = ActiveClip();
+                var reason = clip is { } confinement
+                    ? $"the cursor is confined to {confinement.X},{confinement.Y} {confinement.W}x{confinement.H}, "
+                      + "which excludes that point, and moving the pointer did not lift the confinement"
+                    : "the pointer stopped moving although different points were requested, and no confinement explains it";
+
                 throw new CliError(
                     "PointerFrozen",
-                    $"{action}: the pointer is pinned at {report.Landed} — different targets keep being "
-                    + "refused by the same cursor confinement, so further attempts would only repeat it.",
+                    $"{action}: the pointer is pinned at {report.Landed} -- {reason}, so further attempts "
+                    + "would only repeat it.",
                     context: new JsonObject
                     {
                         ["requested"] = Out.Point(report.Requested),
@@ -273,15 +286,21 @@ internal static class Pointer
                         ["strategy"] = report.Strategy,
                         ["landedMonitor"] = Monitors.At(report.Landed)?.Index,
                         ["pinnedAt"] = Out.Point(report.Landed),
-                        ["clip"] = ActiveClip() is { } clip ? Out.Rect(clip) : null,
+                        ["clip"] = clip is { } rect ? Out.Rect(rect) : null,
                         ["causes"] = Out.Strings(causes),
                     },
-                    hints:
-                    [
-                        "a mouse manager or remote-desktop host is holding the pointer: the clip it sets excludes the target",
-                        "small relative moves often release it; this command already tried that",
-                        "move the pointer by hand once (or restart the mouse manager) and retry",
-                    ]);
+                    hints: clip is not null
+                        ?
+                        [
+                            "a mouse manager or remote-desktop host is holding the pointer: the confinement it sets excludes the target",
+                            "small relative moves often release it; this command already tried that",
+                            "move the pointer by hand once (or restart the mouse manager) and retry",
+                        ]
+                        :
+                        [
+                            "something is eating pointer input without leaving a confinement behind",
+                            "check whether an input hook or a protected application owns the pointer, then retry",
+                        ]);
             }
 
             throw new CliError(

@@ -82,6 +82,14 @@ too small to aim at.
   (the cursor landed in a gap between monitors), `input-hook` (something swallows
   or moves injected input). Recapture, re-read the coordinate, retry once, then stop and
   report.
+- `PointerFrozen` — the pointer is pinned: three *different* requested points were all
+  refused by the same cursor confinement (or it stopped answering with no confinement at
+  all), so the call stopped instead of repeating the wait. `error.context.clip` shows the
+  rectangle holding it and `pinnedAt` where it sits. A mouse manager or a remote-desktop
+  host is the usual owner. Nudging the pointer by hand once (or restarting the mouse
+  manager) releases it; retrying in a loop does not. Any command raises it as soon as a
+  confinement outlives the wait and the nudges — a single `mouse click` included — so
+  seeing it once means later attempts will fail the same way until the pointer is freed.
 - `PointNotOnMonitor` — the point is in a gap between monitors. Re-read
   `screen info`; never interpolate across a gap.
 - `CaptureBlank` / a warning containing "blank" — the window returned no pixels:
