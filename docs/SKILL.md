@@ -101,6 +101,14 @@ too small to aim at.
   manager) releases it; retrying in a loop does not. Any command raises it as soon as a
   confinement outlives the wait and the nudges — a single `mouse click` included — so
   seeing it once means later attempts will fail the same way until the pointer is freed.
+- **`window-blocked` (a warning, not an error)** — the window you aimed at is
+  `enabled: false`, so it cannot take the input: something opened a modal dialog on top of
+  it. The dialog is a *separate window* (file pickers are class `#32770`), which is why it
+  never appears inside a `screenshot --window` capture and why clicks on the parent look
+  ignored. The warning names it, and `window list` reports it with an `owner` pointing back
+  at your window. Stop acting on the parent, act on the dialog, and re-check `enabled`
+  afterwards. This is the first thing to look for whenever captures look unchanged but
+  nothing you click has any effect.
 - `PointNotOnMonitor` — the point is in a gap between monitors. Re-read
   `screen info`; never interpolate across a gap.
 - `CaptureBlank` / a warning containing "blank" — the window returned no pixels:

@@ -20,7 +20,9 @@ internal sealed record WindowInfo(
     RectI Rect,
     bool Foreground,
     bool Minimized,
-    bool Visible);
+    bool Visible,
+    bool Enabled,
+    nint Owner);
 
 /// <summary>
 /// Enumeration, lookup and focus of top-level windows. Named <c>WindowList</c> rather than
@@ -98,6 +100,9 @@ internal static class WindowList
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(nint hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowEnabled(nint hwnd);
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(nint hwnd);
@@ -541,11 +546,10 @@ internal static class WindowList
             return false;
         }
 
-        if (GetWindow(hwnd, GwOwner) != 0)
-        {
-            return false;
-        }
-
+        // Owned windows used to be skipped as noise, which hid the one window that matters most:
+        // a modal file dialog is owned by the window that opened it (measured: Notepad's Open
+        // dialog is #32770, owned by the Notepad window, reported by a different process). Tool
+        // windows are still skipped, which keeps palettes and trays out.
         if (((uint)GetWindowLongW(hwnd, GwlExStyle) & WsExToolWindow) != 0)
         {
             return false;
@@ -572,6 +576,23 @@ internal static class WindowList
         "Windows.UI.Core.CoreWindow",
         "ApplicationManager_DesktopShellWindow",
     ];
+
+    /// <summary>
+    /// The visible window that a modal dialog opened on top of <paramref name="hwnd"/> would own,
+    /// i.e. the dialog that makes the target stop responding to clicks. Null when there is none.
+    /// </summary>
+    public static WindowInfo? ModalBlocker(nint hwnd)
+    {
+        foreach (var candidate in List(includeInvisible: false))
+        {
+            if (candidate.Owner == hwnd && candidate.Enabled && candidate.Handle != hwnd)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
 
     private static bool IsHelperClass(string className)
     {
@@ -612,7 +633,9 @@ internal static class WindowList
                 FrameBounds(hwnd),
                 hwnd == foreground,
                 IsIconic(hwnd),
-                IsWindowVisible(hwnd));
+                IsWindowVisible(hwnd),
+                IsWindowEnabled(hwnd),
+                GetWindow(hwnd, GwOwner));
         }
         catch
         {

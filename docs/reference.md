@@ -435,7 +435,14 @@ errors and shows the grammar.
 | `title`, `class`, `process` | identification of a window target |
 | `rect` | the target's rectangle in desktop pixels |
 | `monitor` | index of the monitor containing the target |
-| `foreground`, `minimized` | window state at the moment of the call |
+| `foreground`, `minimized`, `visible` | window state at the moment of the call |
+| `enabled` | `false` when a modal dialog has disabled this window: it cannot take input until the dialog is closed |
+| `owner` | for a dialog, the `hwnd` of the window that opened it (`null` for a top-level window) |
+
+`window list` includes owned windows, because the one an agent needs most is exactly that: a modal
+file dialog (class `#32770`) is owned by the window that opened it, is a separate window, and never
+appears inside a capture of its parent. Find one by class (`window find --class "#32770"`) or take the
+handle from the `window-blocked` warning.
 
 ### `image`
 
@@ -495,6 +502,10 @@ result needs care:
 - an entry containing `blank`: the captured surface is uniform, i.e. the window
   is still painting, minimised, or protected. Recapture with `--settle`, never
   click into a blank capture.
+- an entry starting `window-blocked:` (or `window-disabled:`): the target window is
+  disabled by a modal dialog. The dialog is a separate window, so it is not in the
+  capture and does not make the target respond — act on the named dialog, or on the
+  window with that `owner`.
 
 ## Error codes
 

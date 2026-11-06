@@ -75,6 +75,26 @@ internal static class Targets
         return tolerance;
     }
 
+    /// <summary>
+    /// A disabled window cannot take input, and the reason is almost always a modal dialog owned by
+    /// it — which a window capture cannot show, because the dialog is a separate window. Saying so is
+    /// the difference between "the click is ignored" and "a file dialog is waiting for you".
+    /// </summary>
+    public static void WarnIfBlocked(Response response, WindowInfo window)
+    {
+        if (window.Enabled)
+        {
+            return;
+        }
+
+        var blocker = WindowList.ModalBlocker(window.Handle);
+
+        response.Warn(blocker is null
+            ? $"window-disabled: {window.Hwnd} is disabled, so it will not take that input until whatever opened over it is closed"
+            : $"window-blocked: {window.Hwnd} is disabled by {blocker.Hwnd} ({blocker.Class} \"{blocker.Title}\") — "
+              + "a separate window, so its pixels are not in a capture of this one and input aimed here lands on it");
+    }
+
     public static JsonObject WindowTarget(WindowInfo window) => new()
     {
         ["kind"] = "window",

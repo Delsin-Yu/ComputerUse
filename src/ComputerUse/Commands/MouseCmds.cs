@@ -42,6 +42,7 @@ internal static class MouseCmds
 
         var response = new Response("mouse move");
         response.Root["target"] = SpaceTarget(space);
+        if (space.Window is { } blocked) Targets.WarnIfBlocked(response, blocked);
         response.Root["input"] = Targets.InputReport(report, space);
         response.Pointer(Pointer.Get());
 
@@ -66,6 +67,7 @@ internal static class MouseCmds
 
         var response = new Response("mouse click");
         response.Root["target"] = SpaceTarget(space);
+        if (space.Window is { } blocked) Targets.WarnIfBlocked(response, blocked);
         response.Root["input"] = Targets.InputReport(
             report,
             space,
@@ -128,6 +130,7 @@ internal static class MouseCmds
 
         var response = new Response("mouse drag");
         response.Root["target"] = SpaceTarget(space);
+        if (space.Window is { } blocked) Targets.WarnIfBlocked(response, blocked);
         response.Root["input"] = new JsonObject
         {
             ["from"] = new JsonObject
@@ -186,6 +189,7 @@ internal static class MouseCmds
         if (space is not null)
         {
             response.Root["target"] = SpaceTarget(space);
+        if (space.Window is { } blocked) Targets.WarnIfBlocked(response, blocked);
         }
 
         if (space is not null && report is not null)
@@ -235,6 +239,7 @@ internal static class MouseCmds
         if (space is not null)
         {
             response.Root["target"] = SpaceTarget(space);
+        if (space.Window is { } blocked) Targets.WarnIfBlocked(response, blocked);
         }
 
         if (space is not null && report is not null)

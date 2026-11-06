@@ -36,6 +36,8 @@ internal static class Out
         ["foreground"] = w.Foreground,
         ["minimized"] = w.Minimized,
         ["visible"] = w.Visible,
+        ["enabled"] = w.Enabled,
+        ["owner"] = w.Owner == nint.Zero ? null : Geo.WindowList.FormatHwnd(w.Owner),
     };
 
     public static JsonObject Monitor(MonitorInfo m) => new()

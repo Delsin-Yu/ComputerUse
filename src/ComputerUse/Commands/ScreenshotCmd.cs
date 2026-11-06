@@ -76,6 +76,11 @@ internal static class ScreenshotCmd
             response.Root["target"] = target;
             response.Pointer(Pointer.Get());
 
+            if (space.Window is { } capturedWindow)
+            {
+                Targets.WarnIfBlocked(response, capturedWindow);
+            }
+
             if (!capture.SizeMatchesSource)
             {
                 response.Warn(

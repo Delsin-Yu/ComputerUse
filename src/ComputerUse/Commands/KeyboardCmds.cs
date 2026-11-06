@@ -54,6 +54,11 @@ internal static class KeyboardCmds
             ? new JsonObject { ["kind"] = "focused" }
             : Targets.WindowTarget(window);
 
+        if (window is { } blocked)
+        {
+            Targets.WarnIfBlocked(response, blocked);
+        }
+
         response.Root["input"] = new JsonObject
         {
             ["text"] = text.Length <= 200 ? text : text[..200],
@@ -94,6 +99,11 @@ internal static class KeyboardCmds
         response.Root["target"] = window is null
             ? new JsonObject { ["kind"] = "focused" }
             : Targets.WindowTarget(window);
+
+        if (window is { } blocked)
+        {
+            Targets.WarnIfBlocked(response, blocked);
+        }
 
         if (hold is not null)
         {
