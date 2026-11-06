@@ -6,3 +6,4 @@ obj/
 *.png
 TestResults/
 dist/
+.spinney/

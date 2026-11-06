@@ -41,6 +41,17 @@ A Windows CLI for agents. One JSON object on stdout per call, exit 0 ok /
 One decision, one action, one capture. Never chain two clicks without looking
 between them.
 
+### Two things a picture does not tell you
+
+- **Selection is not focus.** A list item can look highlighted while the window's
+  internal focus sits in the address bar, and then `F2` / arrows do nothing. Click
+  the item, *then* send the shortcut.
+- **Inline rename keeps the extension.** Explorer preselects only the base name, so
+  typing `beta.txt` into `alpha.txt` gives `beta.txt.txt`. Type `beta` and keep the
+  extension the UI already left there.
+- After any keyboard step, look again: a shortcut that silently did nothing and one
+  that worked look identical from `ok: true`.
+
 ## Coordinate spaces
 
 | how the target is selected | what `--at / --from / --to / --rect / --mark` mean |

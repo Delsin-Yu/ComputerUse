@@ -152,7 +152,7 @@ internal static class MouseCmds
 
         if (args.Flag("--shot"))
         {
-            Shoot(response, space, to, new MoveReport(space.ToSpace(to), space.ToSpace(landed), 1, "drag"), args.IntOr("--zoom", 4), "drag");
+            Shoot(response, space, to, new MoveReport(to, landed, 1, "drag"), args.IntOr("--zoom", 4), "drag");
         }
 
         return response.Emit();
@@ -267,7 +267,11 @@ internal static class MouseCmds
 
     private static void Shoot(Response response, Space space, PointI requestedScreen, MoveReport report, int zoom, string kind)
     {
-        var landedScreen = space.ToScreen(report.Landed);
+        // MoveReport carries screen (desktop) pixels: Pointer never works in a window's space,
+        // only Targets.InputReport translates for the JSON. Converting again here offset the
+        // confirmation crop by the window origin — measured: a window at x=1947 aimed at
+        // window 461 produced a crop centred on 4355 instead of 2408.
+        var landedScreen = report.Landed;
         var (image, geometry) = Shots.Around(landedScreen, requestedScreen, landedScreen, zoom, kind);
         response.Root["image"] = image;
         response.Root["geometry"] = geometry;
