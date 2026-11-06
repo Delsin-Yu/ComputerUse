@@ -124,6 +124,10 @@ too small to aim at.
 - Never run two desktop-mutating calls in parallel (no concurrent clicks, drags,
   scrolls, typing, or foreground changes). Serialise them.
 - Prefer `--window` over desktop coordinates when the target is a window.
+- You do not need to aim at seams yourself: when a direct move to another panel fails,
+  the tool routes through the shared edges the panels actually have (a panel that shares
+  no edge is reached through a third one). `screen run-probe --routes` prints that plan
+  for every pair, which is the quickest way to learn the shape of a desk you cannot see.
 
 ## Typing text safely
 

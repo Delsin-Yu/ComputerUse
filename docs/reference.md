@@ -218,12 +218,13 @@ Monitor object: `index` (integer, used by `screenshot --monitor <i>`), `device`
 ## `screen run-probe`
 
 ```
-computer-use screen run-probe [--samples <n>]
+computer-use screen run-probe [--samples <n>] [--routes]
 ```
 
 | option | default | meaning |
 | --- | --- | --- |
-| `--samples <n>` | 3 | capture/measure samples per monitor |
+| `--samples <n>` | 3 | grid points per axis inside each monitor (so `3` is 9 points per monitor) |
+| `--routes` | off | also walk the planned crossing for every ordered monitor pair and report it under `routes` |
 
 Returns `report`:
 
@@ -232,13 +233,16 @@ Returns `report`:
 | `monitors` | the monitors as probed, with their measured DPI and scale |
 | `mapping` | the per-monitor result of checking that the reported rectangle matches what a capture actually contains (origin, size, `pxPerPoint`) |
 | `verdict` | one human-readable line summarising the probe; print it, do not parse it: `exact`, `approximate-within-tolerance`, `remapped`, `blocked-at-seam`, `clipped-by-hook`, `pointer-frozen` |
+| `timings` | milliseconds per phase (`mappingMs`, `seamsMs`, `deadZoneMs`, `captureMs`, plus `routesMs` with `--routes`) so "it got slower" is a number, not a guess |
+| `routes` | with `--routes`: for each ordered monitor pair, `planned` (the panels the pointer must pass through, e.g. `1>2>0`), `walks`, `hopCount` and per-hop `kind`/`delta`. This is the routing the tool performs when a direct move fails |
 
 A mapping point carries `strategy` and, when it applies, `clipWaitMs`, `clipped` and
 `frozen`. `frozen` means the pointer had already refused three different targets and
 the command stopped paying the clip budget for every further point — the pointer is
 being held, not mis-aimed.
 
-Run it when aiming feels wrong on a mixed-DPI or multi-monitor machine.
+Run it when aiming feels wrong on a mixed-DPI or multi-monitor machine, and with `--routes`
+when you want to know whether every panel can actually be reached from every other one.
 
 ## `mouse move`
 

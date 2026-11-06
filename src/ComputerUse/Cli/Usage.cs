@@ -8,7 +8,7 @@ computer-use - observation-first Windows control for agents.
 
   computer-use screenshot --window <sel> | --monitor [<idx|device>] [options]
   computer-use screen info
-  computer-use screen run-probe [--samples <n>]
+  computer-use screen run-probe [--samples <n>] [--routes]
   computer-use window list | find | move-to-foreground | wait | point-info
   computer-use mouse move | click | drag | scroll | down | up
   computer-use keyboard type | press
@@ -44,6 +44,7 @@ screen run-probe [--samples <n>]
   info       monitors, per-monitor DPI/scale, virtual desktop, pointer position
   run-probe  live diagnosis; moves the pointer ~40-80 times. Reports the mapping error
              table per monitor, cross-seam crossings, dead zones and capture sanity.
+             --routes also walks the planned crossing for every ordered monitor pair.
 """;
 
     public const string Window = """

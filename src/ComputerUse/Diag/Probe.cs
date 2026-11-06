@@ -28,7 +28,13 @@ internal static class Probe
     public static int Run(string[] argv, int start)
     {
         Dispatch.LastCommand = "screen run-probe";
-        var args = Args.Parse(argv, start, "screen run-probe", Usage.Screen, new HashSet<string>(StringComparer.Ordinal) { "--samples" }, new HashSet<string>(StringComparer.Ordinal));
+        var args = Args.Parse(
+            argv,
+            start,
+            "screen run-probe",
+            Usage.Screen,
+            new HashSet<string>(StringComparer.Ordinal) { "--samples" },
+            new HashSet<string>(StringComparer.Ordinal) { "--routes" });
         var samples = Math.Clamp(args.IntOr("--samples", 3), 1, 5);
 
         var watch = Stopwatch.StartNew();
@@ -64,13 +70,28 @@ internal static class Probe
         report["capture"] = CaptureChecks();
         var captureMs = phase.ElapsedMilliseconds;
 
-        report["timings"] = new JsonObject
+        var routesMs = -1;
+        if (args.Flag("--routes"))
+        {
+            phase.Restart();
+            report["routes"] = Routes(monitors);
+            routesMs = (int)phase.ElapsedMilliseconds;
+        }
+
+        var timings = new JsonObject
         {
             ["mappingMs"] = mappingMs,
             ["seamsMs"] = seamsMs,
             ["deadZoneMs"] = deadZoneMs,
             ["captureMs"] = captureMs,
         };
+
+        if (routesMs >= 0)
+        {
+            timings["routesMs"] = routesMs;
+        }
+
+        report["timings"] = timings;
 
         // Read again: a clip rect can be set and released by whatever owns the
         // foreground, so a single reading at the start can contradict the probes.
@@ -425,6 +446,58 @@ internal static class Probe
         }
 
         return mark;
+    }
+
+    /// <summary>
+    /// Planned crossings for every ordered monitor pair: which panels the pointer must pass
+    /// through, and whether each crossing landed. This is the routing the tool performs when a
+    /// direct move fails, measured without waiting for a failure to happen.
+    /// </summary>
+    private static JsonArray Routes(IReadOnlyList<MonitorInfo> monitors)
+    {
+        var routes = new JsonArray();
+
+        foreach (var from in monitors)
+        {
+            foreach (var to in monitors)
+            {
+                if (from.Index == to.Index)
+                {
+                    continue;
+                }
+
+                var planned = Geo.Seams.Path(monitors, from.Index, to.Index);
+                var (ok, walked, hops) = Pointer.WalkRoute(from.Rect.Center, to.Rect.Center);
+                var hopArray = new JsonArray();
+
+                foreach (var hop in hops)
+                {
+                    hopArray.Add((JsonNode)new JsonObject
+                    {
+                        ["kind"] = hop.Kind,
+                        ["from"] = hop.From,
+                        ["to"] = hop.To,
+                        ["approach"] = Out.Point(hop.Approach),
+                        ["requested"] = Out.Point(hop.Requested),
+                        ["landed"] = Out.Point(hop.Landed),
+                        ["delta"] = hop.Delta,
+                    });
+                }
+
+                routes.Add((JsonNode)new JsonObject
+                {
+                    ["from"] = from.Index,
+                    ["to"] = to.Index,
+                    ["planned"] = string.Join(">", planned),
+                    ["walks"] = ok,
+                    ["walked"] = walked,
+                    ["hopCount"] = hops.Count,
+                    ["hops"] = hopArray,
+                });
+            }
+        }
+
+        return routes;
     }
 
     private static JsonArray DeadZones()

@@ -33,6 +33,9 @@ internal static class Pointer
     private const int ClipWaitBudgetMs = 500;
     private const int ClipPollMs = 20;
 
+    /// <summary>How far either side of a shared edge a planned crossing steps.</summary>
+    private const int SeamStep = 24;
+
     /// <summary>Upper bound on relative moves spent trying to release a held clip.</summary>
     private const int NudgeMax = 12;
 
@@ -549,29 +552,103 @@ internal static class Pointer
         }
     }
 
-    /// <summary>Walks through the monitor centres so a straight jump cannot be stopped by a seam.</summary>
+    /// <summary>
+    /// Crosses the monitors the pointer actually has to cross, one shared edge at a time.
+    /// The previous version hopped from one monitor centre to the other, which for panels that
+    /// are not adjacent (DISPLAY2 to DISPLAY4 on this desk) means teleporting over empty desktop
+    /// and hoping the retry ladder survives it. Hop counts and seam geometry come from
+    /// <see cref="Geo.Seams"/>, so the path is planned rather than guessed.
+    /// </summary>
     private static void RouteTo(PointI target)
     {
         var from = Get();
-        var startMonitor = Monitors.At(from);
-        var targetMonitor = Monitors.At(target);
+        var start = Monitors.At(from);
+        var goal = Monitors.At(target);
 
-        if (startMonitor is null || targetMonitor is null)
+        if (start is null || goal is null || start.Index == goal.Index)
         {
             WalkTo(target);
             return;
         }
 
-        if (startMonitor.Index == targetMonitor.Index)
+        var monitors = Monitors.All();
+        var path = Seams.Path(monitors, start.Index, goal.Index);
+
+        if (path.Count < 2)
         {
+            // No shared edges at all: nothing better than approaching the point directly.
             WalkTo(target);
             return;
         }
 
-        AbsoluteSend(startMonitor.Rect.Center);
-        Thread.Sleep(4);
-        AbsoluteSend(targetMonitor.Rect.Center);
-        Thread.Sleep(4);
+        _ = WalkRoute(from, target);
         WalkTo(target);
+    }
+
+    /// <summary>One planned crossing: which seam, where it was aimed and where the pointer ended.</summary>
+    internal sealed record RouteHop(string Kind, int From, int To, PointI Approach, PointI Requested, PointI Landed, int Delta);
+
+    /// <summary>
+    /// Walks the monitor adjacency path from one point to another, one shared edge at a time.
+    /// Used by <see cref="RouteTo"/> and by the probe, so what the probe measures is the routing
+    /// the tool actually performs.
+    /// </summary>
+    internal static (bool Ok, string Path, List<RouteHop> Hops) WalkRoute(PointI start, PointI target)
+    {
+        var hops = new List<RouteHop>();
+        var startMonitor = Monitors.At(start);
+        var goalMonitor = Monitors.At(target);
+
+        if (startMonitor is null || goalMonitor is null || startMonitor.Index == goalMonitor.Index)
+        {
+            return (false, string.Empty, hops);
+        }
+
+        var monitors = Monitors.All();
+        var path = Seams.Path(monitors, startMonitor.Index, goalMonitor.Index);
+
+        if (path.Count < 2)
+        {
+            return (false, string.Join(">", path), hops);
+        }
+
+        var here = start;
+        var ok = true;
+
+        for (var hop = 0; hop + 1 < path.Count; hop++)
+        {
+            var seam = Seams.Find(monitors, path[hop], path[hop + 1]);
+            if (seam is null)
+            {
+                ok = false;
+                break;
+            }
+
+            // Cross at the stretch of the seam nearest to where the pointer already is.
+            var along = seam.Along(seam.IsVertical ? here.Y : here.X);
+            var (approach, land, _) = seam.Points(SeamStep, along);
+
+            AbsoluteSend(approach);
+            Thread.Sleep(5);
+
+            var landed = Move(land, 1);
+            hops.Add(new RouteHop(
+                seam.IsVertical ? "vertical" : "horizontal",
+                path[hop],
+                path[hop + 1],
+                approach,
+                land,
+                landed.Landed,
+                landed.Delta));
+
+            if (MaxDistance(landed.Landed, land) > 2)
+            {
+                ok = false;
+            }
+
+            here = landed.Landed;
+        }
+
+        return (ok, string.Join(">", path), hops);
     }
 }
