@@ -1,88 +1,48 @@
 # Deploying computer-use
 
-The AOT build is **one self-contained native executable** (about 3 MB). The target
-machine needs no .NET runtime, no SDK, no admin rights — just the exe and its two
-documents in the agent skill folder.
-
-## What gets installed where
+The release artifact is a zip of one directory:
 
 ```
-%USERPROFILE%\.cursor\skills\computer-use\
-    bin\computer-use.exe     the tool
-    SKILL.md                 what the agent reads every session
-    reference.md             full option/JSON/error reference
+computer-use/
+    bin/computer-use.exe     self-contained native executable, x64
+    SKILL.md                 what an agent reads first
+    reference.md             full command/JSON/error reference
 ```
 
-## Path A — copy a package (no toolchain on the target)
+No installer is shipped. Unpack the zip wherever you keep agent skills and point your agent at
+`SKILL.md`; the tool itself needs nothing but that directory. It writes nothing outside it except
+screenshots, which land in `%TEMP%\computer-use\` unless `--out` names a path.
 
-1. On the build machine:
+## Verifying a fresh copy
 
-   ```powershell
-   dotnet publish src/ComputerUse/ComputerUse.csproj -c Release -r win-x64
-   ```
-
-   That produces `src/ComputerUse/bin/Release/net10.0-windows/win-x64/publish/computer-use.exe`
-   (the `.pdb` is optional and only useful for debugging crashes).
-
-2. Assemble a package (or reuse `dist/computer-use-win-x64.zip` from the build machine):
-
-   ```
-   computer-use-win-x64\
-       bin\computer-use.exe
-       SKILL.md
-       reference.md
-       install-from-package.ps1
-       selftest.ps1
-       typetarget.ps1
-   ```
-
-3. Move the folder or the zip to the target over whatever channel is at hand
-   (remote-desktop file transfer, a share, a USB stick, a cloud drive).
-
-4. On the target, in the extracted folder:
-
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-from-package.ps1
-   ```
-
-   The script copies the three files, clears the mark-of-the-web that a file moved
-   over a share usually carries (otherwise the first launch can be blocked), prints
-   the installed path, and then runs `screen info` — if that fails, nothing was
-   installed correctly and it says so.
-
-   `-SkillDir` overrides the destination, `-Path` adds `bin` to the user `PATH`.
-
-## Path B — build on the target
-
-Needed only when that machine also has the source and the **.NET 10 SDK**:
-
-```powershell
-git clone <repo> computer-use
-cd computer-use
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
+computer-use\bin\computer-use.exe screen info
 ```
 
-`install.ps1` publishes and copies in one step. It expects `dotnet` on `PATH`.
+`ok: true` with a `monitors` array means the binary runs on that machine. If instead you get
+`{"ok":false,"error":{"code":"DpiAwarenessRequired"…}}`, the tool was started in a session where
+per-monitor DPI awareness cannot be set (a service context, or a locked session): it refuses to emit
+coordinates it cannot trust. Run it from a normal interactive desktop session.
 
-## After installing (on the target)
+## Uninstall
 
-```powershell
-computer-use screen info                 # monitors, DPI, virtual desktop, pointer
-computer-use screen run-probe --samples 3   # mapping error table, seams, dead zones, capture sanity
-powershell -NoProfile -ExecutionPolicy Bypass -File .\selftest.ps1 -Samples 3
+Delete the directory. There is no registry footprint, no service, no scheduled task, and no config
+file.
+
+## Requirements
+
+Windows 10 1703 or newer, x64. The binary is Native AOT: no .NET runtime, no SDK, no administrator
+rights.
+
+## Building the package yourself
+
+On a machine with the .NET 10 SDK:
+
+```
+dotnet publish src/ComputerUse/ComputerUse.csproj -c Release -r win-x64
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package.ps1
 ```
 
-`run-probe` moves the pointer 40–80 times; do not run it while somebody is typing.
-`selftest.ps1` clicks inside a throwaway window it opens itself and types into it,
-so it never touches a real document; it skips (never fails) checks the current
-session cannot support.
-
-## Notes
-
-- x64 only (`-r win-x64`). An ARM64 machine needs `-r win-arm64`.
-- The agent picks up `SKILL.md`/`reference.md` from the skill folder on its next
-  session; there is no service to restart.
-- Nothing is written outside the skill folder and `%TEMP%\computer-use\` (images).
-- If the tool prints `{"ok":false,"error":{"code":"DpiAwarenessRequired"…}}`, it is
-  running in a session where per-monitor-v2 awareness cannot be set (a service or a
-  locked session). Run it from a normal interactive desktop session.
+`scripts/package.ps1` writes `dist\computer-use-skill.zip` containing exactly the three files above.
+`scripts/install.ps1` is the developer convenience that publishes and copies straight into a local
+skill folder; neither script is part of the shipped zip.

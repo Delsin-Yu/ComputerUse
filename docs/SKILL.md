@@ -109,7 +109,7 @@ too small to aim at.
   `--monitor` instead. Never click into a blank capture.
 - `Ambiguous` — the selector matched several windows; use `window find --all`
   and an explicit `hwnd:`.
-- `DpiAwarenessRequired` — the process could not become per-monitor-v2 aware;
+- `DpiAwarenessRequired` — the process could not become per-monitor DPI aware;
   the tool refuses to emit coordinates it cannot trust. Stop.
 - Exit 1 means your command line is wrong, 2 means the machine refused. Both
   still print JSON: read `error.code`.

@@ -405,7 +405,7 @@ internal static class Pointer
                 return
                 [
                     $"the landing point looks like a DPI scale factor of {factor} was applied twice",
-                    "the tool runs per-monitor-v2; something between here and the cursor is scaling coordinates",
+                    "the tool runs per-monitor aware; something between here and the cursor is scaling coordinates",
                 ];
             }
         }

@@ -39,7 +39,7 @@ internal static class Gdi
     [DllImport("gdi32.dll")]
     private static extern bool DeleteDC(nint dc);
 
-    /// <summary>Copies composed screen pixels. In a per-monitor-v2 process these are physical pixels.</summary>
+    /// <summary>Copies composed screen pixels. In a per-monitor aware process these are physical pixels.</summary>
     public static Bitmap FromScreen(RectI region)
     {
         if (region.W <= 0 || region.H <= 0)

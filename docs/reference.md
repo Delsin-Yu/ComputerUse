@@ -207,7 +207,7 @@ No options. Returns:
 | --- | --- |
 | `monitors` | array of monitors (see below) |
 | `virtualBounds` | rect enclosing every monitor, desktop pixels |
-| `awareness` | the process awareness actually in force, e.g. `per-monitor-v2` |
+| `awareness` | the process awareness actually in force: `per-monitor`, `system` or `unaware` |
 | `pointer` | the current cursor block |
 
 Monitor object: `index` (integer, used by `screenshot --monitor <i>`), `device`
@@ -509,7 +509,7 @@ result needs care:
 | `PointerFrozen` | 2 | three different requested points were refused by the same confinement — or the pointer stopped answering with no confinement at all, which looks the same from here — so the command stopped retrying instead of paying the wait again for each one | `error.context.pinnedAt` is where the pointer sits and `clip` the rectangle holding it (`null` when no confinement explains it). A mouse manager or remote-desktop host usually owns it: move the pointer by hand once (or restart that manager) and retry; retrying in a loop will not. Nothing was clicked. Any command raises it once a confinement outlives the wait and the nudges (a single `mouse click` included), so one occurrence predicts the next attempt will fail the same way until the pointer is freed |
 | `CaptureBlank` | 2 | the capture contained no usable pixels | raise the window, add `--settle`, or capture the `--monitor` instead |
 | `CaptureFailed` | 2 | the OS refused the capture (invalid target, protected window, resource failure) | see `error.message`; try a crop or the `--monitor` |
-| `DpiAwarenessRequired` | 2 | per-monitor-v2 DPI awareness could not be enabled | the tool refuses to emit coordinates it cannot trust; run it from a normal interactive desktop session |
+| `DpiAwarenessRequired` | 2 | per-monitor DPI awareness could not be enabled | the tool refuses to emit coordinates it cannot trust; run it from a normal interactive desktop session |
 | `InputNotAccepted` | 2 | the OS accepted fewer input events than were injected (UIPI, elevated target, secured desktop) | run the tool at the same integrity level as the target window |
 | `Timeout` | 2 | `window wait` never saw the condition within `--timeout` | widen the timeout, or re-check the selector |
 | `CaptureRegionOutsideImage` | 2 | the requested crop does not overlap the captured pixels | re-read `geometry.capture`; crop inside the window |

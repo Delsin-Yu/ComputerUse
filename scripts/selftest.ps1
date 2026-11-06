@@ -289,7 +289,7 @@ $dpiValue = 'unknown'
 if ($null -ne $info -and $null -ne $info.awareness) { $dpiValue = [string]$info.awareness }
 
 $dpiOk = ($script:DpiFailures -eq 0)
-if ($dpiValue -ne 'unknown' -and $dpiValue -ne 'per-monitor-v2') { $dpiOk = $false }
+if ($dpiValue -ne 'unknown' -and $dpiValue -ne 'per-monitor') { $dpiOk = $false }
 
 if ($dpiOk) {
     Write-Pass '2 dpi-awareness' ('no DpiAwarenessRequired; reported ' + $dpiValue + ' (probe in 7 is authoritative)')
